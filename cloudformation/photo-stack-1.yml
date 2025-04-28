@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AI Photo Album - Complete Infrastructure Stack
+
+Resources:
+
+  ## S3 Buckets
+  PhotoStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: photo-storage-bucket-3396
+
+  FrontendHostingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: photo-album-frontend-3396
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+
+  FrontendHostingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendHostingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "${FrontendHostingBucket.Arn}/*"
+
+  ## IAM Roles
+  IndexPhotosLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: index-photos-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - rekognition:DetectLabels
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                Resource: "*"
+
+  SearchPhotosLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: search-photos-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                  - s3:GetObject
+                Resource: "*"
+
+  ## Lambda Functions
+  IndexPhotosLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: index-photos-cf
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt IndexPhotosLambdaRole.Arn
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {
+                  "statusCode": 200,
+                  "body": "Index Lambda placeholder"
+              }
+
+  SearchPhotosLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: search-photos-cf
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.11
+      Role: !GetAtt SearchPhotosLambdaRole.Arn
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {
+                  "statusCode": 200,
+                  "body": "Search Lambda placeholder"
+              }
+
+  ## API Gateway
+  PhotoAlbumApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: PhotoAlbumAPI
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  PhotoAlbumApiResourceUpload:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt PhotoAlbumApi.RootResourceId
+      PathPart: upload
+      RestApiId: !Ref PhotoAlbumApi
+
+  PhotoAlbumApiResourceSearch:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt PhotoAlbumApi.RootResourceId
+      PathPart: search
+      RestApiId: !Ref PhotoAlbumApi
+
+  ## API Method: PUT /upload → Proxy to S3
+  UploadMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PhotoAlbumApi
+      ResourceId: !Ref PhotoAlbumApiResourceUpload
+      HttpMethod: PUT
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: PUT
+        Uri: 
+          Fn::Sub: "arn:aws:apigateway:${AWS::Region}:s3:path/${PhotoStorageBucket}/{filename}"
+        Credentials: !GetAtt IndexPhotosLambdaRole.Arn
+        RequestParameters:
+          integration.request.path.filename: "method.request.header.filename"
+          integration.request.header.Content-Type: "method.request.header.Content-Type"
+          integration.request.header.x-amz-meta-customLabels: "method.request.header.x-amz-meta-customLabels"
+      RequestParameters:
+        method.request.header.Content-Type: true
+        method.request.header.x-amz-meta-customLabels: true
+        method.request.header.filename: true
+
+  ## API Method: GET /search → Lambda integration
+  SearchMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref PhotoAlbumApi
+      ResourceId: !Ref PhotoAlbumApiResourceSearch
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SearchPhotosLambda.Arn}/invocations"
+
+  ## Lambda Permissions for API Gateway to invoke
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SearchPhotosLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PhotoAlbumApi}/*/GET/search"
+
+Outputs:
+
+  WebsiteURL:
+    Description: "Frontend S3 static website URL"
+    Value: !GetAtt FrontendHostingBucket.WebsiteURL
+
+  ApiUrl:
+    Description: "Base URL for the API Gateway"
+    Value: !Sub "https://${PhotoAlbumApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
