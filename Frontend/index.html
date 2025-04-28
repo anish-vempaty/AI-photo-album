@@ -65,8 +65,8 @@
   <div id="results"></div>
 
   <script>
-    const apiEndpoint = 'https://u76byh7rj2.execute-api.us-east-1.amazonaws.com/prod'; // ✅ updated API
-    const apiKey = '2EqPlzYpLY2Xn355maiJN9Zvj4xiNmwD9WR3Gwx1'; // your API Key
+    const apiEndpoint = 'https://ababababaab.execute-api.us-east-1.amazonaws.com/prod'; 
+    const apiKey = 'ababababababababab'; // your API Key
 
     document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -79,7 +79,7 @@
         return;
       }
 
-      const uploadUrl = `${apiEndpoint}/upload`;  // ✅ Correct: Upload goes to /upload
+      const uploadUrl = `${apiEndpoint}/upload`;  
 
       try {
         const res = await fetch(uploadUrl, {
@@ -124,7 +124,7 @@
 
         if (data.results && data.results.length > 0) {
           data.results.forEach(photo => {
-            const imgUrl = `https://${photo.bucket}.s3.amazonaws.com/${photo.objectKey}`; // 🔥 make sure your Lambda outputs `bucket` and `objectKey`
+            const imgUrl = `https://${photo.bucket}.s3.amazonaws.com/${photo.objectKey}`; 
             const img = document.createElement('img');
             img.src = imgUrl;
             img.width = 300;
